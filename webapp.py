@@ -11,10 +11,12 @@ import math
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from threading import Lock, Thread
+import os
+from threading import Lock
 from uuid import uuid4
 
 import numpy as np
+from celery import Celery
 from flask import Flask, abort, jsonify, redirect, render_template, request, send_from_directory, url_for
 from werkzeug.utils import secure_filename
 
@@ -68,6 +70,8 @@ PREVIEW_SCALE = 4
 JOB_RETENTION_SECONDS = 60 * 60
 MAX_JOB_LOGS = 200
 MAX_JOBS = 200
+JOB_STATUS_FILENAME = "job.json"
+JOB_LOG_FILENAME = "job.log"
 MAX_STEPS = 200
 MAX_IMAGE_SIZE = 50
 MAX_MAZE_DIM = 50
@@ -89,6 +93,73 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 _JOBS: Dict[str, Dict[str, Any]] = {}
 _JOBS_LOCK = Lock()
+
+
+def _celery_url() -> str:
+    return os.getenv("REDIS_URL") or os.getenv("CELERY_BROKER_URL") or "redis://localhost:6379/0"
+
+
+CELERY_BROKER_URL = _celery_url()
+CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
+celery_app = Celery("quantum-walk-explorer", broker=CELERY_BROKER_URL, backend=CELERY_RESULT_BACKEND)
+celery_app.conf.update(task_track_started=True, result_expires=3600)
+
+if os.getenv("CELERY_EAGER") == "1":
+    celery_app.conf.task_always_eager = True
+    celery_app.conf.task_eager_propagates = True
+elif "REDIS_URL" not in os.environ and "CELERY_BROKER_URL" not in os.environ:
+    logger.warning("REDIS_URL not set; Celery will try localhost (set CELERY_EAGER=1 for local sync mode).")
+
+
+def _job_status_path(run_id: str) -> Path:
+    return RUNS_DIR / run_id / JOB_STATUS_FILENAME
+
+
+def _job_log_path(run_id: str) -> Path:
+    return RUNS_DIR / run_id / JOB_LOG_FILENAME
+
+
+def _load_job_status(run_id: str) -> Optional[Dict[str, Any]]:
+    path = _job_status_path(run_id)
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return None
+
+
+def _write_job_status(run_id: str, payload: Dict[str, Any]) -> None:
+    path = _job_status_path(run_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(".tmp")
+    temp_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+    temp_path.replace(path)
+
+
+def _read_job_logs(run_id: str, since: int) -> Optional[Dict[str, Any]]:
+    log_path = _job_log_path(run_id)
+    if not log_path.exists():
+        return {"logs": [], "next_index": 0}
+    try:
+        lines = log_path.read_text(encoding="utf-8").splitlines()
+    except OSError:
+        return None
+    total = len(lines)
+    since = max(0, since)
+    if since >= total:
+        return {"logs": [], "next_index": total}
+    logs = []
+    for line in lines[since:]:
+        try:
+            entry = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        message = entry.get("detail") or entry.get("status") or "update"
+        if entry.get("error"):
+            message = f"error: {entry['error']}"
+        logs.append({"ts": entry.get("ts", ""), "message": message})
+    return {"logs": logs, "next_index": total}
 
 
 def _parse_job_time(value: Optional[str]) -> Optional[datetime]:
@@ -1348,6 +1419,9 @@ def _set_job(run_id: str, status: str, detail: Optional[str] = None, error: Opti
         }
         return detail_map.get(detail_value, 20)
 
+    job_data: Optional[Dict[str, Any]] = None
+    log_entry: Optional[Dict[str, Any]] = None
+
     with _JOBS_LOCK:
         _purge_jobs()
         job = _JOBS.setdefault(run_id, {"status": "queued"})
@@ -1359,52 +1433,97 @@ def _set_job(run_id: str, status: str, detail: Optional[str] = None, error: Opti
         if error is not None:
             job["error"] = error
         job["progress"] = progress_value(status, detail)
+        now = datetime.now()
         if status == "running" and "started_at" not in job:
-            job["started_at"] = datetime.now().isoformat()
+            job["started_at"] = now.isoformat()
         if status in ("complete", "error"):
-            job["finished_at"] = datetime.now().isoformat()
+            job["finished_at"] = now.isoformat()
         if "logs" not in job:
             job["logs"] = []
         if status != previous_status or (detail and detail != previous_detail):
+            log_ts = now.isoformat(timespec="seconds")
             job["logs"].append(
                 {
-                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "ts": log_ts,
                     "message": detail or status,
                 }
             )
+            log_entry = {
+                "ts": log_ts,
+                "status": status,
+                "detail": detail or status,
+                "error": error,
+            }
         if error:
+            log_ts = now.isoformat(timespec="seconds")
             job["logs"].append(
                 {
-                    "ts": datetime.now().isoformat(timespec="seconds"),
+                    "ts": log_ts,
                     "message": f"error: {error}",
                 }
             )
+            if log_entry is None:
+                log_entry = {
+                    "ts": log_ts,
+                    "status": status,
+                    "detail": detail or status,
+                    "error": error,
+                }
+            else:
+                log_entry["error"] = error
         if len(job["logs"]) > MAX_JOB_LOGS:
             del job["logs"][:-MAX_JOB_LOGS]
-        job["last_update"] = datetime.now().isoformat()
+        job["last_update"] = now.isoformat()
+        job_data = {
+            "id": run_id,
+            "status": job.get("status"),
+            "detail": job.get("detail"),
+            "progress": job.get("progress"),
+            "error": job.get("error"),
+            "started_at": job.get("started_at"),
+            "finished_at": job.get("finished_at"),
+            "last_update": job.get("last_update"),
+        }
     if error:
         logger.error("Run %s failed: %s", run_id, error)
     else:
         logger.info("Run %s status: %s", run_id, detail or status)
 
-    run_dir = RUNS_DIR / run_id
-    run_dir.mkdir(parents=True, exist_ok=True)
+    if job_data is not None:
+        try:
+            _write_job_status(run_id, job_data)
+        except Exception:
+            logger.warning("Run %s: failed to persist job status", run_id)
+
     try:
-        log_path = run_dir / "job.log"
-        if detail or error or status != previous_status:
-            entry = {
-                "ts": datetime.now().isoformat(timespec="seconds"),
-                "status": status,
-                "detail": detail or status,
-                "error": error,
-            }
+        if log_entry is not None:
+            log_path = _job_log_path(run_id)
+            log_path.parent.mkdir(parents=True, exist_ok=True)
             with log_path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(entry) + "\n")
+                handle.write(json.dumps(log_entry) + "\n")
     except Exception:
         logger.warning("Run %s: failed to persist job log", run_id)
 
 
 def _get_job(run_id: str) -> Optional[Dict[str, Any]]:
+    disk_job = _load_job_status(run_id)
+    if disk_job:
+        return disk_job
+    run_path = RUNS_DIR / run_id / "run.json"
+    if run_path.exists():
+        try:
+            finished_at = datetime.fromtimestamp(run_path.stat().st_mtime).isoformat()
+        except OSError:
+            finished_at = None
+        return {
+            "id": run_id,
+            "status": "complete",
+            "detail": "complete",
+            "progress": 100,
+            "error": None,
+            "finished_at": finished_at,
+            "last_update": finished_at,
+        }
     with _JOBS_LOCK:
         _purge_jobs()
         job = _JOBS.get(run_id)
@@ -1414,6 +1533,9 @@ def _get_job(run_id: str) -> Optional[Dict[str, Any]]:
 
 
 def _get_job_logs(run_id: str, since: int) -> Optional[Dict[str, Any]]:
+    disk_logs = _read_job_logs(run_id, since)
+    if disk_logs is not None:
+        return disk_logs
     with _JOBS_LOCK:
         _purge_jobs()
         job = _JOBS.get(run_id)
@@ -1451,6 +1573,11 @@ def _run_job(
 ) -> None:
     _set_job(run_id, "running", "queued")
     try:
+        upload_path = Path(upload_path)
+        if start_xy is not None:
+            start_xy = tuple(start_xy)
+        if goal_xy is not None:
+            goal_xy = tuple(goal_xy)
         run_dir = generate_run(
             upload_path,
             run_id,
@@ -1663,6 +1790,36 @@ def _run_job_cube(
         _set_job(run_id, "error", "error", str(exc))
 
 
+@celery_app.task
+def run_job_task(**kwargs) -> None:
+    _run_job(**kwargs)
+
+
+@celery_app.task
+def run_job_generated_task(**kwargs) -> None:
+    _run_job_generated(**kwargs)
+
+
+@celery_app.task
+def run_job_maze3d_task(**kwargs) -> None:
+    _run_job_maze3d(**kwargs)
+
+
+@celery_app.task
+def run_job_polar_task(**kwargs) -> None:
+    _run_job_polar(**kwargs)
+
+
+@celery_app.task
+def run_job_hypercube_task(**kwargs) -> None:
+    _run_job_hypercube(**kwargs)
+
+
+@celery_app.task
+def run_job_cube_task(**kwargs) -> None:
+    _run_job_cube(**kwargs)
+
+
 @app.route("/")
 def landing():
     return render_template("index.html")
@@ -1739,33 +1896,28 @@ def upload():
         return render_template("upload.html", error="Qiskit compare requires the Qiskit backend."), 400
 
     _set_job(run_id, "queued", "queued")
-    thread = Thread(
-        target=_run_job,
-        kwargs={
-            "run_id": run_id,
-            "upload_path": upload_path,
-            "threshold": threshold,
-            "invert": invert,
-            "max_size": max_size,
-            "start_xy": start_xy,
-            "goal_xy": goal_xy,
-            "detect_markers": detect_markers,
-            "auto_threshold": auto_threshold,
-            "cleanup": cleanup,
-            "min_component": min_component,
-            "steps": steps,
-            "dt": dt,
-            "gamma": gamma,
-            "solve": solve,
-            "gif": gif,
-            "gif_steps": gif_steps,
-            "gif_multiplier": gif_multiplier,
-            "backend": backend,
-            "qiskit_compare": qiskit_compare,
-        },
-        daemon=True,
+    run_job_task.delay(
+        run_id=run_id,
+        upload_path=str(upload_path),
+        threshold=threshold,
+        invert=invert,
+        max_size=max_size,
+        start_xy=start_xy,
+        goal_xy=goal_xy,
+        detect_markers=detect_markers,
+        auto_threshold=auto_threshold,
+        cleanup=cleanup,
+        min_component=min_component,
+        steps=steps,
+        dt=dt,
+        gamma=gamma,
+        solve=solve,
+        gif=gif,
+        gif_steps=gif_steps,
+        gif_multiplier=gif_multiplier,
+        backend=backend,
+        qiskit_compare=qiskit_compare,
     )
-    thread.start()
 
     return redirect(url_for("status", run_id=run_id))
 
@@ -1831,24 +1983,19 @@ def generate():
     rows = generate_maze(width, height, seed=seed)
 
     _set_job(run_id, "queued", "queued")
-    thread = Thread(
-        target=_run_job_generated,
-        kwargs={
-            "run_id": run_id,
-            "rows": rows,
-            "steps": steps,
-            "dt": dt,
-            "gamma": gamma,
-            "solve": solve,
-            "gif": gif,
-            "gif_steps": gif_steps,
-            "gif_multiplier": gif_multiplier,
-            "backend": backend,
-            "qiskit_compare": qiskit_compare,
-        },
-        daemon=True,
+    run_job_generated_task.delay(
+        run_id=run_id,
+        rows=rows,
+        steps=steps,
+        dt=dt,
+        gamma=gamma,
+        solve=solve,
+        gif=gif,
+        gif_steps=gif_steps,
+        gif_multiplier=gif_multiplier,
+        backend=backend,
+        qiskit_compare=qiskit_compare,
     )
-    thread.start()
 
     return redirect(url_for("status", run_id=run_id))
 
@@ -1920,27 +2067,22 @@ def maze3d_run():
         return render_template("upload.html", error="Qiskit compare requires the Qiskit backend."), 400
 
     _set_job(run_id, "queued", "queued")
-    thread = Thread(
-        target=_run_job_maze3d,
-        kwargs={
-            "run_id": run_id,
-            "width": width,
-            "height": height,
-            "depth": depth,
-            "seed": seed,
-            "steps": steps,
-            "dt": dt,
-            "gamma": gamma,
-            "solve": solve,
-            "gif": gif,
-            "gif_steps": gif_steps,
-            "gif_multiplier": gif_multiplier,
-            "backend": backend,
-            "qiskit_compare": qiskit_compare,
-        },
-        daemon=True,
+    run_job_maze3d_task.delay(
+        run_id=run_id,
+        width=width,
+        height=height,
+        depth=depth,
+        seed=seed,
+        steps=steps,
+        dt=dt,
+        gamma=gamma,
+        solve=solve,
+        gif=gif,
+        gif_steps=gif_steps,
+        gif_multiplier=gif_multiplier,
+        backend=backend,
+        qiskit_compare=qiskit_compare,
     )
-    thread.start()
 
     return redirect(url_for("status", run_id=run_id))
 
@@ -2004,26 +2146,21 @@ def polar_run():
         return render_template("upload.html", error="Qiskit compare requires the Qiskit backend."), 400
 
     _set_job(run_id, "queued", "queued")
-    thread = Thread(
-        target=_run_job_polar,
-        kwargs={
-            "run_id": run_id,
-            "rings": rings,
-            "sectors": sectors,
-            "seed": seed,
-            "steps": steps,
-            "dt": dt,
-            "gamma": gamma,
-            "solve": solve,
-            "gif": gif,
-            "gif_steps": gif_steps,
-            "gif_multiplier": gif_multiplier,
-            "backend": backend,
-            "qiskit_compare": qiskit_compare,
-        },
-        daemon=True,
+    run_job_polar_task.delay(
+        run_id=run_id,
+        rings=rings,
+        sectors=sectors,
+        seed=seed,
+        steps=steps,
+        dt=dt,
+        gamma=gamma,
+        solve=solve,
+        gif=gif,
+        gif_steps=gif_steps,
+        gif_multiplier=gif_multiplier,
+        backend=backend,
+        qiskit_compare=qiskit_compare,
     )
-    thread.start()
 
     return redirect(url_for("status", run_id=run_id))
 
@@ -2135,25 +2272,20 @@ def hypercube_run():
         return render_template("upload.html", error="Qiskit compare requires the Qiskit backend."), 400
 
     _set_job(run_id, "queued", "queued")
-    thread = Thread(
-        target=_run_job_hypercube,
-        kwargs={
-            "run_id": run_id,
-            "dimensions": dimensions,
-            "steps": steps,
-            "dt": dt,
-            "gamma": gamma,
-            "dynamic": dynamic,
-            "shift_rate": shift_rate,
-            "seed": seed,
-            "gif": gif,
-            "gif_3d": gif_3d,
-            "backend": backend,
-            "qiskit_compare": qiskit_compare,
-        },
-        daemon=True,
+    run_job_hypercube_task.delay(
+        run_id=run_id,
+        dimensions=dimensions,
+        steps=steps,
+        dt=dt,
+        gamma=gamma,
+        dynamic=dynamic,
+        shift_rate=shift_rate,
+        seed=seed,
+        gif=gif,
+        gif_3d=gif_3d,
+        backend=backend,
+        qiskit_compare=qiskit_compare,
     )
-    thread.start()
 
     return redirect(url_for("status", run_id=run_id))
 
@@ -2192,21 +2324,16 @@ def cube_run():
         return render_template("upload.html", error="Qiskit backend is not supported for cube puzzles yet."), 400
 
     _set_job(run_id, "queued", "queued")
-    thread = Thread(
-        target=_run_job_cube,
-        kwargs={
-            "run_id": run_id,
-            "size": size,
-            "steps": steps,
-            "dt": dt,
-            "gamma": gamma,
-            "shift_rate": shift_rate,
-            "seed": seed,
-            "gif": gif,
-        },
-        daemon=True,
+    run_job_cube_task.delay(
+        run_id=run_id,
+        size=size,
+        steps=steps,
+        dt=dt,
+        gamma=gamma,
+        shift_rate=shift_rate,
+        seed=seed,
+        gif=gif,
     )
-    thread.start()
 
     return redirect(url_for("status", run_id=run_id))
 
