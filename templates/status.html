@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-header">
+  <div>
+    <p class="eyebrow">Run status</p>
+    <h1>Processing {{ run_id }}</h1>
+    <p class="lede">We are simulating the quantum walk and generating visuals. This page will update automatically.</p>
+  </div>
+</section>
+
+<section class="panel">
+  <div class="status-card">
+    <div class="status-row">
+      <span>Status</span>
+      <strong id="status-text">{{ job.status }}</strong>
+    </div>
+    <div class="status-row">
+      <span>Detail</span>
+      <strong id="detail-text">{{ job.detail if job.detail else "starting" }}</strong>
+    </div>
+    <div class="status-row">
+      <span>Progress</span>
+      <strong id="progress-text">{{ job.progress if job.progress is not none else 0 }}%</strong>
+    </div>
+    <div class="status-bar">
+      <div class="status-fill" id="progress-fill" style="width: {{ job.progress if job.progress is not none else 0 }}%;"></div>
+    </div>
+    <div class="status-row error" id="error-row" {% if not job.error %}style="display:none;"{% endif %}>
+      <span>Error</span>
+      <strong id="error-text">{{ job.error if job.error else "" }}</strong>
+    </div>
+    <div class="status-row notice" id="connection-row" style="display:none;">
+      <span>Connection</span>
+      <strong id="connection-text">Reconnecting...</strong>
+    </div>
+    <div class="status-actions" id="actions" style="display:none;">
+      <a class="btn primary" href="{{ url_for('solutions', focus=run_id) }}">View solutions</a>
+      <a class="btn ghost" href="{{ url_for('upload') }}">Upload another maze</a>
+    </div>
+  </div>
+</section>
+
+<script>
+  const statusText = document.getElementById("status-text");
+  const detailText = document.getElementById("detail-text");
+  const progressText = document.getElementById("progress-text");
+  const progressFill = document.getElementById("progress-fill");
+  const errorRow = document.getElementById("error-row");
+  const errorText = document.getElementById("error-text");
+  const connectionRow = document.getElementById("connection-row");
+  const connectionText = document.getElementById("connection-text");
+  const actions = document.getElementById("actions");
+  let logIndex = 0;
+
+  async function pollStatus() {
+    try {
+      const response = await fetch("{{ url_for('run_status', run_id=run_id) }}");
+      if (!response.ok) {
+        throw new Error("status fetch failed");
+      }
+      const data = await response.json();
+      statusText.textContent = data.status || "unknown";
+      detailText.textContent = data.detail || "running";
+      progressText.textContent = `${data.progress ?? 0}%`;
+      progressFill.style.width = `${data.progress ?? 0}%`;
+
+      if (data.error) {
+        errorRow.style.display = "flex";
+        errorText.textContent = data.error;
+      }
+
+      if (data.status === "complete" || data.status === "error") {
+        actions.style.display = "flex";
+      }
+
+      connectionRow.style.display = "none";
+    } catch (err) {
+      connectionRow.style.display = "flex";
+      connectionText.textContent = "Lost connection to server. Is it still running?";
+    }
+
+    try {
+      const response = await fetch(`{{ url_for('run_logs', run_id=run_id) }}?since=${logIndex}`);
+      if (!response.ok) {
+        return;
+      }
+      const data = await response.json();
+      const logs = data.logs || [];
+      logs.forEach((entry) => {
+        console.log(`[${entry.ts}] ${entry.message}`);
+      });
+      logIndex = data.next_index ?? logIndex;
+    } catch (err) {
+      console.warn("Log polling failed");
+    }
+  }
+
+  pollStatus();
+  setInterval(pollStatus, 2000);
+</script>
+{% endblock %}

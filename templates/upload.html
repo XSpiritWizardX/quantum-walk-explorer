@@ -1,0 +1,487 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-header">
+  <div>
+    <p class="eyebrow">Maze intake</p>
+    <h1>Mazes</h1>
+    <p class="lede">Generate a maze or upload your own image to run the explorer.</p>
+  </div>
+</section>
+
+<section class="grid split">
+  <div class="panel">
+    <h2>Generate a maze</h2>
+    <p>Skip the upload and spin up a brand-new maze with the built-in generator.</p>
+    <div class="hint">Width/height are in cells. The final grid is roughly (2 * width + 1) by (2 * height + 1).</div>
+  </div>
+  <div class="panel">
+    <form class="upload-form" method="post" action="{{ url_for('generate') }}">
+      <div class="form-row">
+        <label>
+          Width (cells)
+          <input type="number" name="width" min="2" value="12" />
+        </label>
+        <label>
+          Height (cells)
+          <input type="number" name="height" min="2" value="12" />
+        </label>
+        <label>
+          Seed
+          <input type="number" name="seed" placeholder="optional" />
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          Steps
+          <input type="number" name="steps" min="2" value="60" />
+        </label>
+        <label>
+          dt
+          <input type="number" name="dt" step="0.01" min="0.01" value="0.35" />
+        </label>
+        <label>
+          Gamma
+          <input type="number" name="gamma" step="0.01" min="0.01" value="1.0" />
+        </label>
+      </div>
+      <div class="form-row checks">
+        <label class="check"><input type="checkbox" name="solve" checked />Solve maze</label>
+        <label class="check"><input type="checkbox" name="gif" checked />Generate GIF</label>
+        <label class="check">
+          <input type="checkbox" name="qiskit" {% if not qiskit_available %}disabled{% endif %} />
+          Use Qiskit backend
+        </label>
+        <label class="check">
+          <input type="checkbox" name="qiskit_compare" {% if not qiskit_available %}disabled{% endif %} />
+          Compare vs NumPy
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          GIF steps
+          <input type="number" name="gif_steps" min="2" placeholder="optional" />
+        </label>
+        <label>
+          GIF path multiplier
+          <input type="number" name="gif_multiplier" step="0.1" min="0.1" value="2.0" />
+        </label>
+      </div>
+      <button class="btn primary" type="submit">Generate & run</button>
+    </form>
+  </div>
+</section>
+
+<section class="grid split">
+  <div class="panel">
+    <h2>Generate a polar maze</h2>
+    <p>Build a circular maze with rings and sectors, then watch the walk flow outward.</p>
+    <div class="hint">More sectors increases detail, more rings increases depth.</div>
+  </div>
+  <div class="panel">
+    <form class="upload-form" method="post" action="{{ url_for('polar_run') }}">
+      <div class="form-row">
+        <label>
+          Rings
+          <input type="number" name="rings" min="2" value="6" />
+        </label>
+        <label>
+          Sectors
+          <input type="number" name="sectors" min="4" value="16" />
+        </label>
+        <label>
+          Seed
+          <input type="number" name="seed" placeholder="optional" />
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          Steps
+          <input type="number" name="steps" min="2" value="60" />
+        </label>
+        <label>
+          dt
+          <input type="number" name="dt" step="0.01" min="0.01" value="0.35" />
+        </label>
+        <label>
+          Gamma
+          <input type="number" name="gamma" step="0.01" min="0.01" value="1.0" />
+        </label>
+      </div>
+      <div class="form-row checks">
+        <label class="check"><input type="checkbox" name="solve" checked />Solve maze</label>
+        <label class="check"><input type="checkbox" name="gif" checked />Generate GIF</label>
+        <label class="check">
+          <input type="checkbox" name="qiskit" {% if not qiskit_available %}disabled{% endif %} />
+          Use Qiskit backend
+        </label>
+        <label class="check">
+          <input type="checkbox" name="qiskit_compare" {% if not qiskit_available %}disabled{% endif %} />
+          Compare vs NumPy
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          GIF steps
+          <input type="number" name="gif_steps" min="2" placeholder="optional" />
+        </label>
+        <label>
+          GIF path multiplier
+          <input type="number" name="gif_multiplier" step="0.1" min="0.1" value="2.0" />
+        </label>
+      </div>
+      <button class="btn primary" type="submit">Generate polar maze</button>
+    </form>
+  </div>
+</section>
+
+<section class="grid split">
+  <div class="panel">
+    <h2>Generate a 3D maze</h2>
+    <p>Build a true 3D maze and visualize every cell in a rotating view.</p>
+    <div class="hint">Depth adds a third axis of rooms. Smaller sizes render faster.</div>
+  </div>
+  <div class="panel">
+    <form class="upload-form" method="post" action="{{ url_for('maze3d_run') }}">
+      <div class="form-row">
+        <label>
+          Width (cells)
+          <input type="number" name="width" min="2" value="6" />
+        </label>
+        <label>
+          Height (cells)
+          <input type="number" name="height" min="2" value="6" />
+        </label>
+        <label>
+          Depth (cells)
+          <input type="number" name="depth" min="2" value="6" />
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          Seed
+          <input type="number" name="seed" placeholder="optional" />
+        </label>
+        <label>
+          Steps
+          <input type="number" name="steps" min="2" value="60" />
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          dt
+          <input type="number" name="dt" step="0.01" min="0.01" value="0.35" />
+        </label>
+        <label>
+          Gamma
+          <input type="number" name="gamma" step="0.01" min="0.01" value="1.0" />
+        </label>
+      </div>
+      <div class="form-row checks">
+        <label class="check"><input type="checkbox" name="solve" checked />Solve maze</label>
+        <label class="check"><input type="checkbox" name="gif" checked />Generate GIF</label>
+        <label class="check">
+          <input type="checkbox" name="qiskit" {% if not qiskit_available %}disabled{% endif %} />
+          Use Qiskit backend
+        </label>
+        <label class="check">
+          <input type="checkbox" name="qiskit_compare" {% if not qiskit_available %}disabled{% endif %} />
+          Compare vs NumPy
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          GIF steps
+          <input type="number" name="gif_steps" min="2" placeholder="optional" />
+        </label>
+        <label>
+          GIF path multiplier
+          <input type="number" name="gif_multiplier" step="0.1" min="0.1" value="2.0" />
+        </label>
+      </div>
+      <button class="btn primary" type="submit">Generate 3D maze</button>
+    </form>
+  </div>
+</section>
+
+<section class="grid split">
+  <div class="panel">
+    <h2>Hypercube generator</h2>
+    <p>Generate a dynamic hypercube maze (Cube-movie style) and run a quantum walk on it.</p>
+    <div class="hint">This mode scrambles room connectivity over time.</div>
+  </div>
+  <div class="panel">
+    <form class="upload-form" id="hypercube-form" method="post" action="{{ url_for('hypercube_run') }}">
+      <div class="form-row">
+        <label>
+          Dimensions
+          <input type="number" name="dimensions" min="1" max="10" value="6" />
+        </label>
+        <label>
+          Steps
+          <input type="number" name="steps" min="2" value="60" />
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          dt
+          <input type="number" name="dt" step="0.01" min="0.01" value="0.35" />
+        </label>
+        <label>
+          Gamma
+          <input type="number" name="gamma" step="0.01" min="0.01" value="1.0" />
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          Shift rate
+          <input type="number" name="shift_rate" step="0.05" min="0" max="1" value="0.2" />
+        </label>
+        <label>
+          Seed
+          <input type="number" name="seed" placeholder="optional" />
+        </label>
+      </div>
+      <div class="form-row checks">
+        <label class="check"><input type="checkbox" name="dynamic" id="hypercube-dynamic" checked />Dynamic room shifts</label>
+        <label class="check"><input type="checkbox" name="gif" checked />Generate GIF</label>
+        <label class="check"><input type="checkbox" name="gif_3d" checked />3D GIF (rotating)</label>
+        <label class="check">
+          <input type="checkbox" name="qiskit" id="hypercube-qiskit" {% if not qiskit_available %}disabled{% endif %} />
+          Use Qiskit backend
+        </label>
+        <label class="check">
+          <input type="checkbox" name="qiskit_compare" id="hypercube-qiskit-compare" {% if not qiskit_available %}disabled{% endif %} />
+          Compare vs NumPy
+        </label>
+      </div>
+      <div class="hint" id="hypercube-qiskit-hint" hidden>Qiskit only supports static hypercubes. Dynamic shifts will be disabled.</div>
+      <button class="btn primary" type="submit">Run hypercube walk</button>
+    </form>
+  </div>
+</section>
+
+<section class="grid split">
+  <div class="panel">
+    <h2>Cube puzzle (3x3x3)</h2>
+    <p>Generate a rotating cube puzzle and solve it with a time-dependent quantum walk.</p>
+    <div class="hint">Layers rotate each step to mimic a shifting Cube.</div>
+  </div>
+  <div class="panel">
+    <form class="upload-form" method="post" action="{{ url_for('cube_run') }}">
+      <div class="form-row">
+        <label>
+          Size
+          <input type="number" name="size" min="2" max="5" value="3" />
+        </label>
+        <label>
+          Steps
+          <input type="number" name="steps" min="2" value="80" />
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          dt
+          <input type="number" name="dt" step="0.01" min="0.01" value="0.35" />
+        </label>
+        <label>
+          Gamma
+          <input type="number" name="gamma" step="0.01" min="0.01" value="1.0" />
+        </label>
+      </div>
+      <div class="form-row">
+        <label>
+          Shift rate
+          <input type="number" name="shift_rate" step="0.05" min="0" max="1" value="0.3" />
+        </label>
+        <label>
+          Seed
+          <input type="number" name="seed" placeholder="optional" />
+        </label>
+      </div>
+      <div class="form-row checks">
+        <label class="check"><input type="checkbox" name="gif" checked />Generate GIF</label>
+        <label class="check">
+          <input type="checkbox" name="qiskit" disabled />
+          Use Qiskit backend
+        </label>
+        <span class="hint">Qiskit backend is not supported for cube puzzles yet.</span>
+      </div>
+      <button class="btn primary" type="submit">Run cube walk</button>
+    </form>
+  </div>
+</section>
+
+<section class="grid split">
+  <div class="panel">
+    <h2>Accepted formats</h2>
+    <p>PNG, JPG, JPEG, BMP. Bright pixels = open space. Dark pixels = walls.</p>
+    <p class="hint">Optional: add a red dot for start and a green dot for goal.</p>
+    <div class="hint">Tip: use the threshold slider to catch thin corridors.</div>
+    <div class="rules">
+      <div>
+        <strong>Coordinate system</strong>
+        <span>(0,0) is top-left. Provide overrides as <code>x,y</code>.</span>
+      </div>
+      <div>
+        <strong>Run output</strong>
+        <span>Heatmap, solution overlay, GIF, and run log are stored automatically.</span>
+      </div>
+    </div>
+    <div class="preview-panel">
+      <h3>Detection preview</h3>
+      <p class="hint">Preview the detected start/goal before running.</p>
+      <img id="preview-image" alt="preview" />
+      <div class="preview-meta" id="preview-meta"></div>
+    </div>
+    {% if error %}
+    <div class="alert">{{ error }}</div>
+    {% endif %}
+  </div>
+  <div class="panel">
+    <form class="upload-form" id="upload-form" method="post" enctype="multipart/form-data">
+      <label class="file-field">
+        <span>Maze image</span>
+        <input type="file" name="maze_image" accept="image/*" required />
+      </label>
+
+      <div class="form-row">
+        <label>
+          Threshold
+          <input type="number" name="threshold" min="0" max="255" value="128" />
+        </label>
+        <label>
+          Max size
+          <input type="number" name="max_size" min="16" max="512" value="128" />
+        </label>
+      </div>
+
+      <div class="form-row">
+        <label>
+          Steps
+          <input type="number" name="steps" min="2" value="60" />
+        </label>
+        <label>
+          dt
+          <input type="number" name="dt" step="0.01" min="0.01" value="0.35" />
+        </label>
+        <label>
+          Gamma
+          <input type="number" name="gamma" step="0.01" min="0.01" value="1.0" />
+        </label>
+      </div>
+
+      <div class="form-row">
+        <label>
+          Start (x,y)
+          <input type="text" name="start" placeholder="e.g. 2,3" />
+        </label>
+        <label>
+          Goal (x,y)
+          <input type="text" name="goal" placeholder="e.g. 20,15" />
+        </label>
+      </div>
+
+      <div class="form-row checks">
+        <label class="check"><input type="checkbox" name="detect_markers" checked />Auto-detect red/green markers</label>
+        <label class="check"><input type="checkbox" name="auto_threshold" />Auto threshold</label>
+        <label class="check"><input type="checkbox" name="cleanup" checked />Cleanup tiny regions</label>
+        <label class="check"><input type="checkbox" name="invert" />Invert colors</label>
+        <label class="check"><input type="checkbox" name="solve" checked />Solve maze</label>
+        <label class="check"><input type="checkbox" name="gif" checked />Generate GIF</label>
+        <label class="check">
+          <input type="checkbox" name="qiskit" {% if not qiskit_available %}disabled{% endif %} />
+          Use Qiskit backend
+        </label>
+        <label class="check">
+          <input type="checkbox" name="qiskit_compare" {% if not qiskit_available %}disabled{% endif %} />
+          Compare vs NumPy
+        </label>
+      </div>
+
+      <div class="form-row">
+        <label>
+          Min component
+          <input type="number" name="min_component" min="1" value="20" />
+        </label>
+      </div>
+
+      <div class="form-row">
+        <label>
+          GIF steps
+          <input type="number" name="gif_steps" min="2" placeholder="optional" />
+        </label>
+        <label>
+          GIF path multiplier
+          <input type="number" name="gif_multiplier" step="0.1" min="0.1" value="2.0" />
+        </label>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn ghost" type="button" id="preview-button">Preview detection</button>
+        <button class="btn primary" type="submit">Run the Explorer</button>
+      </div>
+    </form>
+  </div>
+</section>
+
+<script>
+  const previewButton = document.getElementById("preview-button");
+  const previewImage = document.getElementById("preview-image");
+  const previewMeta = document.getElementById("preview-meta");
+  const form = document.getElementById("upload-form");
+  const hypercubeForm = document.getElementById("hypercube-form");
+  const hypercubeDynamic = document.getElementById("hypercube-dynamic");
+  const hypercubeQiskit = document.getElementById("hypercube-qiskit");
+  const hypercubeQiskitCompare = document.getElementById("hypercube-qiskit-compare");
+  const hypercubeHint = document.getElementById("hypercube-qiskit-hint");
+
+  async function runPreview() {
+    previewMeta.textContent = "Generating preview...";
+    const formData = new FormData(form);
+    try {
+      const response = await fetch("{{ url_for('preview') }}", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await response.json();
+      if (!response.ok) {
+        previewMeta.textContent = data.error || "Preview failed";
+        return;
+      }
+      previewImage.src = data.preview;
+      previewMeta.textContent = `Start: ${data.start.join(",")} | Goal: ${data.goal.join(",")} | Mode: ${data.endpoint_mode}`;
+    } catch (err) {
+      previewMeta.textContent = "Preview failed to load.";
+    }
+  }
+
+  previewButton.addEventListener("click", runPreview);
+
+  function syncHypercubeQiskit() {
+    if (!hypercubeForm) {
+      return;
+    }
+    const qiskitEnabled = hypercubeQiskit && hypercubeQiskit.checked;
+    if (qiskitEnabled && hypercubeDynamic) {
+      hypercubeDynamic.checked = false;
+      hypercubeDynamic.disabled = true;
+    } else if (hypercubeDynamic) {
+      hypercubeDynamic.disabled = false;
+    }
+    if (hypercubeQiskitCompare) {
+      hypercubeQiskitCompare.disabled = !qiskitEnabled;
+      if (!qiskitEnabled) {
+        hypercubeQiskitCompare.checked = false;
+      }
+    }
+    if (hypercubeHint) {
+      hypercubeHint.hidden = !qiskitEnabled;
+    }
+  }
+
+  if (hypercubeQiskit) {
+    hypercubeQiskit.addEventListener("change", syncHypercubeQiskit);
+    syncHypercubeQiskit();
+  }
+</script>
+{% endblock %}

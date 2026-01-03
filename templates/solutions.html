@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="page-header">
+  <div>
+    <p class="eyebrow">Evidence archive</p>
+    <h1>All maze solutions</h1>
+    <p class="lede">Every run is logged with parameters, probabilities, and visuals for review.</p>
+  </div>
+</section>
+
+{% if runs %}
+  <section class="solutions">
+    {% for run in runs %}
+      <article class="solution-card {% if focus and focus == run.id %}focus{% endif %}" id="run-{{ run.id }}">
+        <header>
+          <div>
+            <h2>{{ run.id }}</h2>
+            <p class="meta">{{ run.created_at }}</p>
+          </div>
+          <div class="meta-grid">
+            <div><span>Steps</span><strong>{{ run.steps }}</strong></div>
+            <div><span>Gamma</span><strong>{{ run.params.gamma }}</strong></div>
+            <div><span>dt</span><strong>{{ run.params.dt }}</strong></div>
+            <div><span>Goal prob</span><strong>{{ "%.3f"|format(run.goal_prob) if run.goal_prob is not none else "n/a" }}</strong></div>
+            <div><span>Path len</span><strong>{{ run.solution_length if run.solution_length is not none else "n/a" }}</strong></div>
+          </div>
+        </header>
+
+        <div class="media-grid">
+          {% if run.assets.input %}
+            <figure>
+              <img src="{{ url_for('run_file', filename=run.id ~ '/maze_input.png') }}" alt="maze input" />
+              <figcaption>Input maze</figcaption>
+            </figure>
+          {% endif %}
+          {% if run.assets.heatmap %}
+            <figure>
+              <img src="{{ url_for('run_file', filename=run.id ~ '/heatmap.png') }}" alt="heatmap" />
+              <figcaption>Final probability map</figcaption>
+            </figure>
+          {% endif %}
+          {% if run.assets.graph %}
+            <figure>
+              <img src="{{ url_for('run_file', filename=run.id ~ '/graph.png') }}" alt="hypercube graph" />
+              <figcaption>Hypercube connectivity map</figcaption>
+            </figure>
+          {% endif %}
+          {% if run.assets.solution %}
+            <figure>
+              <img src="{{ url_for('run_file', filename=run.id ~ '/solution.png') }}" alt="solution" />
+              <figcaption>Shortest path overlay</figcaption>
+            </figure>
+          {% endif %}
+          {% if run.assets.qiskit_png %}
+            <figure>
+              <img src="{{ url_for('run_file', filename=run.id ~ '/qiskit_circuit.png') }}" alt="qiskit circuit" />
+              <figcaption>Qiskit circuit diagram</figcaption>
+            </figure>
+          {% endif %}
+          {% if run.assets.gif %}
+            <figure>
+              <img src="{{ url_for('run_file', filename=run.id ~ '/walk.gif') }}" alt="walk gif" />
+              <figcaption>Interference animation</figcaption>
+            </figure>
+          {% endif %}
+        </div>
+
+        <div class="card-actions">
+          <a class="btn ghost" href="{{ url_for('run_file', filename=run.id ~ '/run.json') }}">Download run.json</a>
+          {% if run.assets.solution %}
+            <a class="btn ghost" href="{{ url_for('run_file', filename=run.id ~ '/solution.json') }}">Download solution.json</a>
+          {% endif %}
+          {% if run.assets.maze3d %}
+            <a class="btn ghost" href="{{ url_for('run_file', filename=run.id ~ '/maze3d.json') }}">Download maze3d.json</a>
+          {% endif %}
+          {% if run.assets.polar %}
+            <a class="btn ghost" href="{{ url_for('run_file', filename=run.id ~ '/polar.json') }}">Download polar.json</a>
+          {% endif %}
+          {% if run.assets.qiskit_qasm %}
+            <a class="btn ghost" href="{{ url_for('run_file', filename=run.id ~ '/qiskit_circuit.qasm') }}">Download qiskit_circuit.qasm</a>
+          {% endif %}
+          {% if run.assets.qiskit_compare %}
+            <a class="btn ghost" href="{{ url_for('run_file', filename=run.id ~ '/qiskit_compare.json') }}">Download qiskit_compare.json</a>
+          {% endif %}
+          {% if run.assets.frames_pdf %}
+            <a class="btn ghost" href="{{ url_for('run_file', filename=run.id ~ '/frames.pdf') }}">Download frames.pdf</a>
+          {% endif %}
+          {% if run.assets.onepager %}
+            <a class="btn ghost" href="{{ url_for('run_file', filename=run.id ~ '/onepager.pdf') }}">Download onepager.pdf</a>
+          {% endif %}
+        </div>
+      </article>
+    {% endfor %}
+  </section>
+{% else %}
+  <section class="panel empty">
+    <h2>No runs yet</h2>
+    <p>Upload a maze to generate your first solution set.</p>
+    <a class="btn primary" href="{{ url_for('upload') }}">Upload a maze</a>
+  </section>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,22 @@
+* TODO Quantum Walk Explorer Roadmap
+** TODO Web app reliability
+- [X] Add a job timeout and surface it on status page
+- [X] Show per-frame progress when rendering GIFs
+- [X] Persist job logs to disk for post-mortem debugging
+** TODO Maze upload automation
+- [X] Improve endpoint detection with distance-transform + contour cleanup
+- [X] Add optional ML-based segmentation for noisy images
+- [X] Add image preview with detected start/goal overlay before running
+** TODO Hypercube (Cube movie) mode
+- [X] Add dynamic "room shift" mode (time-varying edges)
+- [X] Add hypercube visualization (2D projection or force layout)
+- [X] Expose hypercube generator in the web UI
+** TODO Quantum cube puzzle (3x3x3)
+- [X] Define cube-room coordinates (x,y,z) and rotation rules for sections
+- [X] Add randomizer that scrambles room connectivity and rotation states
+- [X] Model the puzzle as a graph for quantum walk search
+- [X] Implement a quantum-inspired solver (state evolution + probability peaks)
+- [X] Log and visualize cube state transitions for demos
+** TODO Employer-facing polish
+- [X] Add a short case study section with metrics on the landing page
+- [X] Add downloadable one-pager PDF for each run

@@ -1,0 +1,23 @@
+* DONE Quantum Walk Explorer Completed
+** DONE Web status and logging
+- [X] Added status page with progress bar and connection warning
+- [X] Streamed server progress logs to browser console
+- [X] Added job timeout + per-frame progress updates
+- [X] Persisted job logs to disk (`job.log`)
+** DONE Maze image automation
+- [X] Auto-detect red/green markers as start/goal
+- [X] Auto-select farthest endpoints if markers are missing
+- [X] Added auto-threshold + cleanup options for noisy images
+- [X] Added preview overlay before running
+** DONE Hypercube generator (static)
+- [X] Added hypercube JSON generator and loader
+- [X] Added hypercube run/solve support in CLI
+** DONE Hypercube dynamic mode
+- [X] Added dynamic hypercube shifts and 2D projection visualization
+- [X] Exposed hypercube run in the web UI
+** DONE Cube puzzle system
+- [X] Implemented 3x3x3 cube rotation model and randomizer
+- [X] Added quantum walk solver + visualization outputs
+** DONE Employer-facing polish
+- [X] Added landing page case study section with metrics
+- [X] Added one-page PDF export per run

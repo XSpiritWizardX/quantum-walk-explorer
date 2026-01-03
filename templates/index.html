@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <div class="hero-text">
+    <p class="eyebrow">Quantum walk visualization lab</p>
+    <h1>Make quantum search visible, measurable, and shareable.</h1>
+    <p class="lede">
+      Quantum Walk Explorer turns mazes into graphs, simulates continuous-time quantum walks,
+      and packages the evidence: heatmaps, solution overlays, GIFs, and reproducible run logs.
+    </p>
+    <div class="hero-actions">
+      <a class="btn primary" href="{{ url_for('upload') }}">Upload a Maze</a>
+      <a class="btn ghost" href="{{ url_for('solutions') }}">View Solutions</a>
+    </div>
+  </div>
+  <div class="hero-card">
+    <div class="card-title">What users should notice</div>
+    <ul>
+      <li>Graph evolution tracked over time, not just final states.</li>
+      <li>Deterministic logs for every experiment and input.</li>
+      <li>Visualization pipeline that explains interference, not just results.</li>
+      <li>Designed for extensibility: maze images, polar graphs, and Qiskit backend.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="grid split">
+  <div class="panel">
+    <h2>What it does</h2>
+    <p>
+      The system converts a maze into a graph, evolves a quantum walk over that graph,
+      and records the probability landscape at every step. It highlights how interference
+      concentrates probability on strong paths while keeping the full state history.
+    </p>
+    <div class="pill-row">
+      <span class="pill">Maze ingestion</span>
+      <span class="pill">Walk evolution</span>
+      <span class="pill">Probability heatmaps</span>
+      <span class="pill">Replayable runs</span>
+    </div>
+  </div>
+  <div class="panel">
+    <h2>Why it matters</h2>
+    <p>
+      Quantum walks are a foundation for search, routing, and graph analysis. This project turns
+      the math into evidence you can inspect, compare, and share with collaborators or employers.
+    </p>
+    <div class="metrics">
+      <div>
+        <div class="metric-value">3</div>
+        <div class="metric-label">Pages in the workflow</div>
+      </div>
+      <div>
+        <div class="metric-value">100%</div>
+        <div class="metric-label">Runs reproducible</div>
+      </div>
+      <div>
+        <div class="metric-value">∞</div>
+        <div class="metric-label">Maze styles</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="grid split">
+  <div class="panel">
+    <h2>Tech involved</h2>
+    <p>
+      Built around continuous-time quantum walks with optional Qiskit backends for circuit
+      artifacts. The pipeline handles image preprocessing, graph construction, simulation,
+      and visualization in one reproducible run.
+    </p>
+    <p>
+      Simulations cover static graphs (grid, maze, polar, 3D), time-dependent graphs
+      (dynamic hypercubes, rotating cube puzzles), and optional Qiskit comparisons to
+      validate probability distributions against NumPy baselines.
+    </p>
+    <div class="pill-row">
+      <span class="pill">Qiskit</span>
+      <span class="pill">NumPy</span>
+      <span class="pill">Matplotlib</span>
+      <span class="pill">Flask</span>
+      <span class="pill">Image I/O</span>
+    </div>
+  </div>
+  <div class="panel">
+    <h2>How a run flows</h2>
+    <p>
+      Every run logs the full time series of statevectors, so you can inspect how
+      interference patterns evolve, not just the final snapshot.
+    </p>
+    <div class="timeline-steps">
+      <div class="step">
+        <span class="step-index">01</span>
+        <h3>Upload or generate a maze</h3>
+        <p>Images are thresholded into walkable graphs with start/goal markers.</p>
+      </div>
+      <div class="step">
+        <span class="step-index">02</span>
+        <h3>Simulate quantum walk</h3>
+        <p>Continuous-time evolution over the adjacency matrix logs every state.</p>
+      </div>
+      <div class="step">
+        <span class="step-index">03</span>
+        <h3>Collect evidence</h3>
+        <p>Heatmaps, GIFs, and solutions land in a single run folder.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section class="case-study">
+  <div class="panel">
+    <h2>Case study: maze image → quantum walk evidence</h2>
+    <p>
+      A 128x128 maze image is thresholded, cleaned, and auto-labeled. The quantum walk evolves for
+      80 steps, and the best goal probability appears at step 47. The full run exports a heatmap,
+      solution overlay, GIF, and a one-page PDF summary.
+    </p>
+    <div class="metrics">
+      <div>
+        <div class="metric-value">128×128</div>
+        <div class="metric-label">Input resolution</div>
+      </div>
+      <div>
+        <div class="metric-value">80</div>
+        <div class="metric-label">Steps simulated</div>
+      </div>
+      <div>
+        <div class="metric-value">47</div>
+        <div class="metric-label">Best goal step</div>
+      </div>
+    </div>
+  </div>
+  <div class="panel">
+    <h2>Deliverables per run</h2>
+    <ul>
+      <li>Heatmap of the final probability distribution.</li>
+      <li>Solution overlay showing the shortest path.</li>
+      <li>Animated GIF of interference over time.</li>
+      <li>One-page PDF snapshot for portfolios.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="cta">
+  <div>
+    <h2>Ready to show the work?</h2>
+    <p>Upload a maze and let the interference field tell the story.</p>
+  </div>
+  <a class="btn primary" href="{{ url_for('upload') }}">Launch the Explorer</a>
+</section>
+{% endblock %}
