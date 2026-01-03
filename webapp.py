@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 import base64
 import io
 import json
@@ -64,6 +64,9 @@ UPLOADS_DIR = BASE_DIR / "uploads"
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "bmp"}
 JOB_TIMEOUT_SECONDS = 300
 PREVIEW_SCALE = 4
+JOB_RETENTION_SECONDS = 60 * 60
+MAX_JOB_LOGS = 200
+MAX_JOBS = 200
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
@@ -77,6 +80,53 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 _JOBS: Dict[str, Dict[str, Any]] = {}
 _JOBS_LOCK = Lock()
+
+
+def _parse_job_time(value: Optional[str]) -> Optional[datetime]:
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
+
+
+def _job_last_update(job: Dict[str, Any]) -> Optional[datetime]:
+    return (
+        _parse_job_time(job.get("last_update"))
+        or _parse_job_time(job.get("finished_at"))
+        or _parse_job_time(job.get("started_at"))
+    )
+
+
+def _purge_jobs(now: Optional[datetime] = None) -> None:
+    if not _JOBS:
+        return
+    now = now or datetime.now()
+    cutoff = now - timedelta(seconds=JOB_RETENTION_SECONDS)
+    stale_ids = []
+    for run_id, job in _JOBS.items():
+        status = job.get("status")
+        if status not in ("complete", "error"):
+            continue
+        finished = _parse_job_time(job.get("finished_at")) or _parse_job_time(job.get("last_update"))
+        if finished and finished < cutoff:
+            stale_ids.append(run_id)
+
+    for run_id in stale_ids:
+        _JOBS.pop(run_id, None)
+
+    if len(_JOBS) <= MAX_JOBS:
+        return
+
+    completed = []
+    for run_id, job in _JOBS.items():
+        if job.get("status") in ("complete", "error"):
+            completed.append((_job_last_update(job) or datetime.min, run_id))
+    completed.sort()
+    while len(_JOBS) > MAX_JOBS and completed:
+        _, run_id = completed.pop(0)
+        _JOBS.pop(run_id, None)
 
 
 @app.context_processor
@@ -1278,6 +1328,7 @@ def _set_job(run_id: str, status: str, detail: Optional[str] = None, error: Opti
         return detail_map.get(detail_value, 20)
 
     with _JOBS_LOCK:
+        _purge_jobs()
         job = _JOBS.setdefault(run_id, {"status": "queued"})
         previous_status = job.get("status")
         previous_detail = job.get("detail")
@@ -1289,7 +1340,7 @@ def _set_job(run_id: str, status: str, detail: Optional[str] = None, error: Opti
         job["progress"] = progress_value(status, detail)
         if status == "running" and "started_at" not in job:
             job["started_at"] = datetime.now().isoformat()
-        if status == "complete":
+        if status in ("complete", "error"):
             job["finished_at"] = datetime.now().isoformat()
         if "logs" not in job:
             job["logs"] = []
@@ -1307,6 +1358,8 @@ def _set_job(run_id: str, status: str, detail: Optional[str] = None, error: Opti
                     "message": f"error: {error}",
                 }
             )
+        if len(job["logs"]) > MAX_JOB_LOGS:
+            del job["logs"][:-MAX_JOB_LOGS]
         job["last_update"] = datetime.now().isoformat()
     if error:
         logger.error("Run %s failed: %s", run_id, error)
@@ -1332,6 +1385,7 @@ def _set_job(run_id: str, status: str, detail: Optional[str] = None, error: Opti
 
 def _get_job(run_id: str) -> Optional[Dict[str, Any]]:
     with _JOBS_LOCK:
+        _purge_jobs()
         job = _JOBS.get(run_id)
         if job:
             return dict(job)
@@ -1340,6 +1394,7 @@ def _get_job(run_id: str) -> Optional[Dict[str, Any]]:
 
 def _get_job_logs(run_id: str, since: int) -> Optional[Dict[str, Any]]:
     with _JOBS_LOCK:
+        _purge_jobs()
         job = _JOBS.get(run_id)
         if not job:
             return None
