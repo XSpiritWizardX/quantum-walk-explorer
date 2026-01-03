@@ -9,6 +9,7 @@ import json
 import logging
 import math
 import re
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import os
@@ -96,11 +97,26 @@ _JOBS_LOCK = Lock()
 
 
 def _celery_url() -> str:
-    return os.getenv("REDIS_URL") or os.getenv("CELERY_BROKER_URL") or "redis://localhost:6379/0"
+    raw_url = os.getenv("REDIS_URL") or os.getenv("CELERY_BROKER_URL") or "redis://localhost:6379/0"
+    return _ensure_redis_ssl(raw_url)
+
+
+def _ensure_redis_ssl(url: str) -> str:
+    if not url:
+        return url
+    parsed = urlparse(url)
+    if parsed.scheme != "rediss":
+        return url
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    if "ssl_cert_reqs" in query:
+        return url
+    query["ssl_cert_reqs"] = "CERT_REQUIRED"
+    new_query = urlencode(query)
+    return urlunparse(parsed._replace(query=new_query))
 
 
 CELERY_BROKER_URL = _celery_url()
-CELERY_RESULT_BACKEND = os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL)
+CELERY_RESULT_BACKEND = _ensure_redis_ssl(os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL))
 celery_app = Celery("quantum-walk-explorer", broker=CELERY_BROKER_URL, backend=CELERY_RESULT_BACKEND)
 celery_app.conf.update(task_track_started=True, result_expires=3600)
 
