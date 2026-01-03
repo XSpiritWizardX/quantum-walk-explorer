@@ -67,6 +67,14 @@ PREVIEW_SCALE = 4
 JOB_RETENTION_SECONDS = 60 * 60
 MAX_JOB_LOGS = 200
 MAX_JOBS = 200
+MAX_STEPS = 200
+MAX_IMAGE_SIZE = 50
+MAX_MAZE_DIM = 50
+MAX_MAZE3D_DIM = 10
+MAX_POLAR_RINGS = 16
+MAX_POLAR_SECTORS = 32
+MAX_HYPERCUBE_DIM = 10
+MAX_CUBE_SIZE = 5
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024
@@ -143,7 +151,14 @@ def create_run_id() -> str:
     return f"{stamp}_{uuid4().hex[:6]}"
 
 
-def parse_int(value: Optional[str], default: int, min_value: Optional[int] = None) -> int:
+def parse_int(
+    value: Optional[str],
+    default: int,
+    min_value: Optional[int] = None,
+    max_value: Optional[int] = None,
+    clamp_max: bool = False,
+    label: str = "value",
+) -> int:
     if value is None or value == "":
         return default
     try:
@@ -152,6 +167,11 @@ def parse_int(value: Optional[str], default: int, min_value: Optional[int] = Non
         raise ValueError("invalid integer value") from exc
     if min_value is not None and parsed < min_value:
         raise ValueError("value below minimum")
+    if max_value is not None and parsed > max_value:
+        if clamp_max:
+            logger.warning("Capping %s from %s to %s", label, parsed, max_value)
+            return max_value
+        raise ValueError("value above maximum")
     return parsed
 
 
@@ -295,7 +315,7 @@ def compute_sim_steps(
         sim_steps = max(sim_steps, gif_steps)
     elif gif and solve_path is not None:
         sim_steps = max(sim_steps, int(math.ceil(len(solve_path) * gif_path_multiplier)))
-    return sim_steps
+    return min(sim_steps, MAX_STEPS)
 
 
 def compute_states(
@@ -1665,14 +1685,28 @@ def upload():
     file.save(upload_path)
 
     try:
-        threshold = parse_int(request.form.get("threshold"), 128, 0)
+        threshold = parse_int(request.form.get("threshold"), 128, 0, 255)
         invert = request.form.get("invert") == "on"
-        max_size = parse_int(request.form.get("max_size"), 128, 16)
+        max_size = parse_int(
+            request.form.get("max_size"),
+            MAX_IMAGE_SIZE,
+            16,
+            MAX_IMAGE_SIZE,
+            clamp_max=True,
+            label="max_size",
+        )
         detect_markers = request.form.get("detect_markers") == "on"
         auto_threshold = request.form.get("auto_threshold") == "on"
         cleanup = request.form.get("cleanup") == "on"
         min_component = parse_int(request.form.get("min_component"), 20, 1)
-        steps = parse_int(request.form.get("steps"), 60, 2)
+        steps = parse_int(
+            request.form.get("steps"),
+            60,
+            2,
+            MAX_STEPS,
+            clamp_max=True,
+            label="steps",
+        )
         dt = parse_float(request.form.get("dt"), 0.35, 0.01)
         gamma = parse_float(request.form.get("gamma"), 1.0, 0.01)
         solve = request.form.get("solve") == "on"
@@ -1682,7 +1716,14 @@ def upload():
         gif_steps_raw = request.form.get("gif_steps")
         gif_steps = None
         if gif_steps_raw:
-            gif_steps = parse_int(gif_steps_raw, 0, 0)
+            gif_steps = parse_int(
+                gif_steps_raw,
+                0,
+                0,
+                MAX_STEPS,
+                clamp_max=True,
+                label="gif_steps",
+            )
             if gif_steps == 0:
                 gif_steps = None
         gif_multiplier = parse_float(request.form.get("gif_multiplier"), 2.0, 0.1)
@@ -1732,11 +1773,32 @@ def upload():
 def generate():
     run_id = create_run_id()
     try:
-        width = parse_int(request.form.get("width"), 12, 2)
-        height = parse_int(request.form.get("height"), 12, 2)
+        width = parse_int(
+            request.form.get("width"),
+            12,
+            2,
+            MAX_MAZE_DIM,
+            clamp_max=True,
+            label="width",
+        )
+        height = parse_int(
+            request.form.get("height"),
+            12,
+            2,
+            MAX_MAZE_DIM,
+            clamp_max=True,
+            label="height",
+        )
         seed_raw = request.form.get("seed")
         seed = int(seed_raw) if seed_raw else None
-        steps = parse_int(request.form.get("steps"), 60, 2)
+        steps = parse_int(
+            request.form.get("steps"),
+            60,
+            2,
+            MAX_STEPS,
+            clamp_max=True,
+            label="steps",
+        )
         dt = parse_float(request.form.get("dt"), 0.35, 0.01)
         gamma = parse_float(request.form.get("gamma"), 1.0, 0.01)
         solve = request.form.get("solve") == "on"
@@ -1746,7 +1808,14 @@ def generate():
         gif_steps_raw = request.form.get("gif_steps")
         gif_steps = None
         if gif_steps_raw:
-            gif_steps = parse_int(gif_steps_raw, 0, 0)
+            gif_steps = parse_int(
+                gif_steps_raw,
+                0,
+                0,
+                MAX_STEPS,
+                clamp_max=True,
+                label="gif_steps",
+            )
             if gif_steps == 0:
                 gif_steps = None
         gif_multiplier = parse_float(request.form.get("gif_multiplier"), 2.0, 0.1)
@@ -1787,12 +1856,40 @@ def generate():
 def maze3d_run():
     run_id = create_run_id()
     try:
-        width = parse_int(request.form.get("width"), 6, 2)
-        height = parse_int(request.form.get("height"), 6, 2)
-        depth = parse_int(request.form.get("depth"), 6, 2)
+        width = parse_int(
+            request.form.get("width"),
+            6,
+            2,
+            MAX_MAZE3D_DIM,
+            clamp_max=True,
+            label="width",
+        )
+        height = parse_int(
+            request.form.get("height"),
+            6,
+            2,
+            MAX_MAZE3D_DIM,
+            clamp_max=True,
+            label="height",
+        )
+        depth = parse_int(
+            request.form.get("depth"),
+            6,
+            2,
+            MAX_MAZE3D_DIM,
+            clamp_max=True,
+            label="depth",
+        )
         seed_raw = request.form.get("seed")
         seed = int(seed_raw) if seed_raw else None
-        steps = parse_int(request.form.get("steps"), 60, 2)
+        steps = parse_int(
+            request.form.get("steps"),
+            60,
+            2,
+            MAX_STEPS,
+            clamp_max=True,
+            label="steps",
+        )
         dt = parse_float(request.form.get("dt"), 0.35, 0.01)
         gamma = parse_float(request.form.get("gamma"), 1.0, 0.01)
         solve = request.form.get("solve") == "on"
@@ -1802,7 +1899,14 @@ def maze3d_run():
         gif_steps_raw = request.form.get("gif_steps")
         gif_steps = None
         if gif_steps_raw:
-            gif_steps = parse_int(gif_steps_raw, 0, 0)
+            gif_steps = parse_int(
+                gif_steps_raw,
+                0,
+                0,
+                MAX_STEPS,
+                clamp_max=True,
+                label="gif_steps",
+            )
             if gif_steps == 0:
                 gif_steps = None
         gif_multiplier = parse_float(request.form.get("gif_multiplier"), 2.0, 0.1)
@@ -1844,11 +1948,32 @@ def maze3d_run():
 def polar_run():
     run_id = create_run_id()
     try:
-        rings = parse_int(request.form.get("rings"), 6, 2)
-        sectors = parse_int(request.form.get("sectors"), 16, 4)
+        rings = parse_int(
+            request.form.get("rings"),
+            6,
+            2,
+            MAX_POLAR_RINGS,
+            clamp_max=True,
+            label="rings",
+        )
+        sectors = parse_int(
+            request.form.get("sectors"),
+            16,
+            4,
+            MAX_POLAR_SECTORS,
+            clamp_max=True,
+            label="sectors",
+        )
         seed_raw = request.form.get("seed")
         seed = int(seed_raw) if seed_raw else None
-        steps = parse_int(request.form.get("steps"), 60, 2)
+        steps = parse_int(
+            request.form.get("steps"),
+            60,
+            2,
+            MAX_STEPS,
+            clamp_max=True,
+            label="steps",
+        )
         dt = parse_float(request.form.get("dt"), 0.35, 0.01)
         gamma = parse_float(request.form.get("gamma"), 1.0, 0.01)
         solve = request.form.get("solve") == "on"
@@ -1858,7 +1983,14 @@ def polar_run():
         gif_steps_raw = request.form.get("gif_steps")
         gif_steps = None
         if gif_steps_raw:
-            gif_steps = parse_int(gif_steps_raw, 0, 0)
+            gif_steps = parse_int(
+                gif_steps_raw,
+                0,
+                0,
+                MAX_STEPS,
+                clamp_max=True,
+                label="gif_steps",
+            )
             if gif_steps == 0:
                 gif_steps = None
         gif_multiplier = parse_float(request.form.get("gif_multiplier"), 2.0, 0.1)
@@ -1908,9 +2040,16 @@ def preview():
     file.save(temp_path)
 
     try:
-        threshold = parse_int(request.form.get("threshold"), 128, 0)
+        threshold = parse_int(request.form.get("threshold"), 128, 0, 255)
         invert = request.form.get("invert") == "on"
-        max_size = parse_int(request.form.get("max_size"), 128, 16)
+        max_size = parse_int(
+            request.form.get("max_size"),
+            MAX_IMAGE_SIZE,
+            16,
+            MAX_IMAGE_SIZE,
+            clamp_max=True,
+            label="max_size",
+        )
         detect_markers = request.form.get("detect_markers") == "on"
         auto_threshold = request.form.get("auto_threshold") == "on"
         cleanup = request.form.get("cleanup") == "on"
@@ -1958,8 +2097,22 @@ def preview():
 def hypercube_run():
     run_id = create_run_id()
     try:
-        dimensions = parse_int(request.form.get("dimensions"), 6, 1)
-        steps = parse_int(request.form.get("steps"), 60, 2)
+        dimensions = parse_int(
+            request.form.get("dimensions"),
+            6,
+            1,
+            MAX_HYPERCUBE_DIM,
+            clamp_max=True,
+            label="dimensions",
+        )
+        steps = parse_int(
+            request.form.get("steps"),
+            60,
+            2,
+            MAX_STEPS,
+            clamp_max=True,
+            label="steps",
+        )
         dt = parse_float(request.form.get("dt"), 0.35, 0.01)
         gamma = parse_float(request.form.get("gamma"), 1.0, 0.01)
         dynamic = request.form.get("dynamic") == "on"
@@ -2008,8 +2161,22 @@ def hypercube_run():
 def cube_run():
     run_id = create_run_id()
     try:
-        size = parse_int(request.form.get("size"), 3, 2)
-        steps = parse_int(request.form.get("steps"), 60, 2)
+        size = parse_int(
+            request.form.get("size"),
+            3,
+            2,
+            MAX_CUBE_SIZE,
+            clamp_max=True,
+            label="size",
+        )
+        steps = parse_int(
+            request.form.get("steps"),
+            60,
+            2,
+            MAX_STEPS,
+            clamp_max=True,
+            label="steps",
+        )
         dt = parse_float(request.form.get("dt"), 0.35, 0.01)
         gamma = parse_float(request.form.get("gamma"), 1.0, 0.01)
         shift_rate = parse_float(request.form.get("shift_rate"), 0.3, 0.0)

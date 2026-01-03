@@ -1076,13 +1076,15 @@ def render_cube_frames(
 
 def assemble_gif(frames: list[Path], output_path: Union[str, Path], fps: int = 6) -> Path:
     try:
-        import imageio.v3 as imageio
+        import imageio.v2 as imageio
     except ImportError as exc:
         raise RuntimeError("imageio is required for GIF export") from exc
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    images = [imageio.imread(frame) for frame in frames]
-    imageio.imwrite(output_path, images, duration=1 / fps, loop=0)
+    duration = 1 / fps
+    with imageio.get_writer(output_path, mode="I", duration=duration, loop=0) as writer:
+        for frame in frames:
+            writer.append_data(imageio.imread(frame))
     return output_path
