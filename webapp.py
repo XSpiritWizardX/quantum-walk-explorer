@@ -62,7 +62,8 @@ BASE_DIR = Path(__file__).resolve().parent
 RUNS_DIR = BASE_DIR / "web_runs"
 UPLOADS_DIR = BASE_DIR / "uploads"
 ALLOWED_EXTENSIONS = {"png", "jpg", "jpeg", "bmp"}
-JOB_TIMEOUT_SECONDS = 300
+JOB_TIMEOUT_SECONDS = 1800
+JOB_STALL_SECONDS = 300
 PREVIEW_SCALE = 4
 JOB_RETENTION_SECONDS = 60 * 60
 MAX_JOB_LOGS = 200
@@ -2231,15 +2232,16 @@ def run_status(run_id: str):
     if job is None:
         return jsonify({"error": "not found"}), 404
     if job.get("status") == "running":
-        started_at = job.get("started_at")
-        if started_at:
-            try:
-                started = datetime.fromisoformat(started_at)
-                if (datetime.now() - started).total_seconds() > JOB_TIMEOUT_SECONDS:
-                    _set_job(run_id, "error", "timeout", "job exceeded time limit")
-                    job = _get_job(run_id) or job
-            except ValueError:
-                pass
+        now = datetime.now()
+        last_update = _parse_job_time(job.get("last_update"))
+        if last_update and (now - last_update).total_seconds() > JOB_STALL_SECONDS:
+            _set_job(run_id, "error", "timeout", "job stalled without updates")
+            job = _get_job(run_id) or job
+        else:
+            started_at = _parse_job_time(job.get("started_at"))
+            if started_at and (now - started_at).total_seconds() > JOB_TIMEOUT_SECONDS:
+                _set_job(run_id, "error", "timeout", "job exceeded time limit")
+                job = _get_job(run_id) or job
     return jsonify(job)
 
 
