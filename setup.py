@@ -22,7 +22,6 @@ setup(
         "pillow>=8.3.2",
         "flask>=2.3",
         "gunicorn>=21.2",
-        "celery[redis]>=5.3",
     ],
     entry_points={
         "console_scripts": [

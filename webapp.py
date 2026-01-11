@@ -9,15 +9,14 @@ import json
 import logging
 import math
 import re
-from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from queue import Queue
+from threading import Lock, Thread
+from typing import Any, Callable, Dict, List, Optional, Tuple
 import os
-from threading import Lock
 from uuid import uuid4
 
 import numpy as np
-from celery import Celery
 from flask import Flask, abort, jsonify, redirect, render_template, request, send_from_directory, url_for
 from werkzeug.utils import secure_filename
 
@@ -94,37 +93,44 @@ UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 
 _JOBS: Dict[str, Dict[str, Any]] = {}
 _JOBS_LOCK = Lock()
+_JOB_QUEUE: "Queue[Tuple[Callable[..., None], Dict[str, Any]]]" = Queue()
 
 
-def _celery_url() -> str:
-    raw_url = os.getenv("REDIS_URL") or os.getenv("CELERY_BROKER_URL") or "redis://localhost:6379/0"
-    return _ensure_redis_ssl(raw_url)
+def _job_worker_count() -> int:
+    raw = os.getenv("JOB_WORKERS", "1")
+    try:
+        count = int(raw)
+    except ValueError:
+        logger.warning("Invalid JOB_WORKERS=%r; defaulting to 1.", raw)
+        return 1
+    return max(1, count)
 
 
-def _ensure_redis_ssl(url: str) -> str:
-    if not url:
-        return url
-    parsed = urlparse(url)
-    if parsed.scheme != "rediss":
-        return url
-    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
-    if "ssl_cert_reqs" in query:
-        return url
-    query["ssl_cert_reqs"] = "CERT_REQUIRED"
-    new_query = urlencode(query)
-    return urlunparse(parsed._replace(query=new_query))
+def _job_worker() -> None:
+    while True:
+        func, kwargs = _JOB_QUEUE.get()
+        try:
+            func(**kwargs)
+        except Exception as exc:
+            run_id = kwargs.get("run_id")
+            if run_id:
+                _set_job(run_id, "error", "error", str(exc))
+            logger.exception("Background job failed")
+        finally:
+            _JOB_QUEUE.task_done()
 
 
-CELERY_BROKER_URL = _celery_url()
-CELERY_RESULT_BACKEND = _ensure_redis_ssl(os.getenv("CELERY_RESULT_BACKEND", CELERY_BROKER_URL))
-celery_app = Celery("quantum-walk-explorer", broker=CELERY_BROKER_URL, backend=CELERY_RESULT_BACKEND)
-celery_app.conf.update(task_track_started=True, result_expires=3600)
+def _start_job_workers() -> None:
+    for idx in range(_job_worker_count()):
+        worker = Thread(target=_job_worker, name=f"job-worker-{idx + 1}", daemon=True)
+        worker.start()
 
-if os.getenv("CELERY_EAGER") == "1":
-    celery_app.conf.task_always_eager = True
-    celery_app.conf.task_eager_propagates = True
-elif "REDIS_URL" not in os.environ and "CELERY_BROKER_URL" not in os.environ:
-    logger.warning("REDIS_URL not set; Celery will try localhost (set CELERY_EAGER=1 for local sync mode).")
+
+def _submit_job(func: Callable[..., None], **kwargs: Any) -> None:
+    _JOB_QUEUE.put((func, kwargs))
+
+
+_start_job_workers()
 
 
 def _job_status_path(run_id: str) -> Path:
@@ -1806,36 +1812,6 @@ def _run_job_cube(
         _set_job(run_id, "error", "error", str(exc))
 
 
-@celery_app.task
-def run_job_task(**kwargs) -> None:
-    _run_job(**kwargs)
-
-
-@celery_app.task
-def run_job_generated_task(**kwargs) -> None:
-    _run_job_generated(**kwargs)
-
-
-@celery_app.task
-def run_job_maze3d_task(**kwargs) -> None:
-    _run_job_maze3d(**kwargs)
-
-
-@celery_app.task
-def run_job_polar_task(**kwargs) -> None:
-    _run_job_polar(**kwargs)
-
-
-@celery_app.task
-def run_job_hypercube_task(**kwargs) -> None:
-    _run_job_hypercube(**kwargs)
-
-
-@celery_app.task
-def run_job_cube_task(**kwargs) -> None:
-    _run_job_cube(**kwargs)
-
-
 @app.route("/")
 def landing():
     return render_template("index.html")
@@ -1912,7 +1888,8 @@ def upload():
         return render_template("upload.html", error="Qiskit compare requires the Qiskit backend."), 400
 
     _set_job(run_id, "queued", "queued")
-    run_job_task.delay(
+    _submit_job(
+        _run_job,
         run_id=run_id,
         upload_path=str(upload_path),
         threshold=threshold,
@@ -1999,7 +1976,8 @@ def generate():
     rows = generate_maze(width, height, seed=seed)
 
     _set_job(run_id, "queued", "queued")
-    run_job_generated_task.delay(
+    _submit_job(
+        _run_job_generated,
         run_id=run_id,
         rows=rows,
         steps=steps,
@@ -2083,7 +2061,8 @@ def maze3d_run():
         return render_template("upload.html", error="Qiskit compare requires the Qiskit backend."), 400
 
     _set_job(run_id, "queued", "queued")
-    run_job_maze3d_task.delay(
+    _submit_job(
+        _run_job_maze3d,
         run_id=run_id,
         width=width,
         height=height,
@@ -2162,7 +2141,8 @@ def polar_run():
         return render_template("upload.html", error="Qiskit compare requires the Qiskit backend."), 400
 
     _set_job(run_id, "queued", "queued")
-    run_job_polar_task.delay(
+    _submit_job(
+        _run_job_polar,
         run_id=run_id,
         rings=rings,
         sectors=sectors,
@@ -2288,7 +2268,8 @@ def hypercube_run():
         return render_template("upload.html", error="Qiskit compare requires the Qiskit backend."), 400
 
     _set_job(run_id, "queued", "queued")
-    run_job_hypercube_task.delay(
+    _submit_job(
+        _run_job_hypercube,
         run_id=run_id,
         dimensions=dimensions,
         steps=steps,
@@ -2340,7 +2321,8 @@ def cube_run():
         return render_template("upload.html", error="Qiskit backend is not supported for cube puzzles yet."), 400
 
     _set_job(run_id, "queued", "queued")
-    run_job_cube_task.delay(
+    _submit_job(
+        _run_job_cube,
         run_id=run_id,
         size=size,
         steps=steps,

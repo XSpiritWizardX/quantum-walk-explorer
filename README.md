@@ -145,12 +145,11 @@ Launch the web app locally:
 
 ```bash
 pip install -e .
-export REDIS_URL=redis://localhost:6379/0
-celery -A webapp.celery_app worker --loglevel=info
 python webapp.py
 ```
 
-Run the Celery worker in a separate terminal so the web server stays responsive while rendering.
+Rendering runs in a background thread in the web process, so the UI stays responsive without Redis. Set `JOB_WORKERS`
+to increase the number of background workers (defaults to 1).
 
 Visit `http://localhost:5000` for:
 
@@ -167,12 +166,6 @@ Run a quick smoke check before launching:
 python scripts/smoke_check.py
 ```
 
-If you do not want Redis locally, you can run in eager mode:
-
-```bash
-CELERY_EAGER=1 python webapp.py
-```
-
 ## Deploy on Render
 
 This repo includes `render.yaml`. Create a new Render Web Service from the repo and deploy.
@@ -182,18 +175,9 @@ The service starts with:
 gunicorn webapp:app
 ```
 
-By default, the web service also starts a Celery worker in the same container so you only need one paid service.
+Jobs are queued in-process, so no Redis service is required.
 
-### Free Redis option (Upstash)
-
-If you do not want to pay for Render Redis, use a free Redis provider like Upstash:
-
-1. Create a free Redis database on Upstash.
-2. Copy the Redis URL (starts with `rediss://`).
-3. In Render, add an environment variable `REDIS_URL` with that URL.
-4. Redeploy; the web service will start the worker and connect to Redis.
-
-## Redis + Celery architecture
+## In-process job architecture
 
 ```text
 Browser
@@ -202,16 +186,13 @@ Browser
 Web (Flask + Gunicorn)
   |  enqueue job
   v
-Redis (broker + result backend)
-  |  dequeue job
-  v
-Worker (Celery)
+Background worker thread
   |
   v
 Artifacts in runs/ + status polling
 ```
 
-In short: the web service stays responsive, Redis queues the work, and the worker does the heavy rendering.
+In short: the web service stays responsive, a background thread does the rendering, and the status page polls progress.
 
 ## Qiskit backend (optional)
 

@@ -3,10 +3,8 @@ services:
     name: quantum-walk-explorer
     env: python
     buildCommand: pip install -e .
-    startCommand: bash -lc "celery -A webapp.celery_app worker --loglevel=info --concurrency=1 --max-tasks-per-child=10 & gunicorn webapp:app"
+    startCommand: gunicorn webapp:app
     autoDeploy: true
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.9
-      - key: REDIS_URL
-        sync: false
